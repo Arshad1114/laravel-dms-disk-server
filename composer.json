@@ -1,0 +1,47 @@
+{
+    "name": "arshad1114/laravel-dms-disk-server",
+    "description": "Laravel server-side receiver package for arshad1114/laravel-dms-disk. Exposes a standardized HTTP API so any consumer service can store files on this DMS using the native Storage facade.",
+    "type": "library",
+    "keywords": ["laravel", "filesystem", "dms", "storage", "microservice", "server"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Arshad",
+            "email": "arshadnoor572@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/routing": "^10.0|^11.0|^12.0",
+        "illuminate/filesystem": "^10.0|^11.0|^12.0",
+        "illuminate/http": "^10.0|^11.0|^12.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0",
+        "phpunit/phpunit": "^10.0|^11.0",
+        "mockery/mockery": "^1.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "Arshad1114\\DmsDiskServer\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Arshad1114\\DmsDiskServer\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Arshad1114\\DmsDiskServer\\DmsServerServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
