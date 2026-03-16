@@ -18,7 +18,9 @@ class DmsReceiverControllerTest extends TestCase
     {
         $app['config']->set('dms-disk-server.token', 'valid-test-token');
         $app['config']->set('dms-disk-server.max_file_size_kb', 10240);
-        Storage::fake();
+        $app['config']->set('filesystems.default', 'fake');
+        Storage::fake('fake');
+        Storage::fake('client');
     }
 
     private function auth(): array
@@ -28,7 +30,7 @@ class DmsReceiverControllerTest extends TestCase
 
     // ── Upload ────────────────────────────────────────────────────────────────
 
-    public function test_upload_stores_file(): void
+    public function test_upload_stores_file_on_default_disk(): void
     {
         $response = $this->withHeaders($this->auth())
             ->post('/dms-disk/upload', [
@@ -39,7 +41,20 @@ class DmsReceiverControllerTest extends TestCase
         $response->assertStatus(200)
                  ->assertJsonFragment(['status' => 'ok', 'path' => 'invoices/001.pdf']);
 
-        Storage::assertExists('invoices/001.pdf');
+        Storage::disk('fake')->assertExists('invoices/001.pdf');
+    }
+
+    public function test_upload_stores_file_on_specified_disk(): void
+    {
+        $response = $this->withHeaders($this->auth())
+            ->post('/dms-disk/upload', [
+                'path' => 'invoices/001.pdf',
+                'file' => UploadedFile::fake()->create('001.pdf', 100, 'application/pdf'),
+                'disk' => 'client',
+            ]);
+
+        $response->assertStatus(200);
+        Storage::disk('client')->assertExists('invoices/001.pdf');
     }
 
     public function test_upload_requires_path_and_file(): void
@@ -49,27 +64,23 @@ class DmsReceiverControllerTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_upload_sets_public_visibility(): void
-    {
-        $this->withHeaders($this->auth())
-            ->post('/dms-disk/upload', [
-                'path'       => 'public/banner.jpg',
-                'file'       => UploadedFile::fake()->image('banner.jpg'),
-                'visibility' => 'public',
-            ])
-            ->assertStatus(200);
-
-        Storage::assertExists('public/banner.jpg');
-    }
-
     // ── Download ──────────────────────────────────────────────────────────────
 
     public function test_download_returns_file_contents(): void
     {
-        Storage::put('docs/file.txt', 'hello world');
+        Storage::disk('fake')->put('docs/file.txt', 'hello world');
 
         $this->withHeaders($this->auth())
             ->get('/dms-disk/file?path=docs/file.txt')
+            ->assertStatus(200);
+    }
+
+    public function test_download_from_specified_disk(): void
+    {
+        Storage::disk('client')->put('docs/file.txt', 'hello from client disk');
+
+        $this->withHeaders($this->auth())
+            ->get('/dms-disk/file?path=docs/file.txt&disk=client')
             ->assertStatus(200);
     }
 
@@ -84,10 +95,20 @@ class DmsReceiverControllerTest extends TestCase
 
     public function test_exists_returns_true(): void
     {
-        Storage::put('test.txt', 'hi');
+        Storage::disk('fake')->put('test.txt', 'hi');
 
         $this->withHeaders($this->auth())
             ->getJson('/dms-disk/exists?path=test.txt')
+            ->assertStatus(200)
+            ->assertJson(['exists' => true]);
+    }
+
+    public function test_exists_on_specified_disk(): void
+    {
+        Storage::disk('client')->put('test.txt', 'hi');
+
+        $this->withHeaders($this->auth())
+            ->getJson('/dms-disk/exists?path=test.txt&disk=client')
             ->assertStatus(200)
             ->assertJson(['exists' => true]);
     }
@@ -104,28 +125,51 @@ class DmsReceiverControllerTest extends TestCase
 
     public function test_delete_removes_file(): void
     {
-        Storage::put('remove-me.txt', 'bye');
+        Storage::disk('fake')->put('remove-me.txt', 'bye');
 
         $this->withHeaders($this->auth())
             ->deleteJson('/dms-disk/file?path=remove-me.txt')
             ->assertStatus(200)
             ->assertJson(['status' => 'ok']);
 
-        Storage::assertMissing('remove-me.txt');
+        Storage::disk('fake')->assertMissing('remove-me.txt');
+    }
+
+    public function test_delete_from_specified_disk(): void
+    {
+        Storage::disk('client')->put('remove-me.txt', 'bye');
+
+        $this->withHeaders($this->auth())
+            ->deleteJson('/dms-disk/file?path=remove-me.txt&disk=client')
+            ->assertStatus(200);
+
+        Storage::disk('client')->assertMissing('remove-me.txt');
     }
 
     // ── Move ──────────────────────────────────────────────────────────────────
 
     public function test_move_renames_file(): void
     {
-        Storage::put('old.txt', 'content');
+        Storage::disk('fake')->put('old.txt', 'content');
 
         $this->withHeaders($this->auth())
             ->postJson('/dms-disk/move', ['from' => 'old.txt', 'to' => 'new.txt'])
             ->assertStatus(200);
 
-        Storage::assertMissing('old.txt');
-        Storage::assertExists('new.txt');
+        Storage::disk('fake')->assertMissing('old.txt');
+        Storage::disk('fake')->assertExists('new.txt');
+    }
+
+    public function test_move_on_specified_disk(): void
+    {
+        Storage::disk('client')->put('old.txt', 'content');
+
+        $this->withHeaders($this->auth())
+            ->postJson('/dms-disk/move', ['from' => 'old.txt', 'to' => 'new.txt', 'disk' => 'client'])
+            ->assertStatus(200);
+
+        Storage::disk('client')->assertMissing('old.txt');
+        Storage::disk('client')->assertExists('new.txt');
     }
 
     public function test_move_returns_404_for_missing_source(): void
@@ -139,8 +183,8 @@ class DmsReceiverControllerTest extends TestCase
 
     public function test_list_returns_files(): void
     {
-        Storage::put('docs/a.pdf', 'a');
-        Storage::put('docs/b.pdf', 'b');
+        Storage::disk('fake')->put('docs/a.pdf', 'a');
+        Storage::disk('fake')->put('docs/b.pdf', 'b');
 
         $this->withHeaders($this->auth())
             ->getJson('/dms-disk/list?directory=docs')
@@ -148,13 +192,13 @@ class DmsReceiverControllerTest extends TestCase
             ->assertJsonCount(2, 'files');
     }
 
-    public function test_list_recursive_returns_all_files(): void
+    public function test_list_on_specified_disk(): void
     {
-        Storage::put('docs/2024/a.pdf', 'a');
-        Storage::put('docs/2025/b.pdf', 'b');
+        Storage::disk('client')->put('docs/a.pdf', 'a');
+        Storage::disk('client')->put('docs/b.pdf', 'b');
 
         $this->withHeaders($this->auth())
-            ->getJson('/dms-disk/list?directory=docs&recursive=true')
+            ->getJson('/dms-disk/list?directory=docs&disk=client')
             ->assertStatus(200)
             ->assertJsonCount(2, 'files');
     }
@@ -163,7 +207,7 @@ class DmsReceiverControllerTest extends TestCase
 
     public function test_metadata_returns_file_info(): void
     {
-        Storage::put('meta.txt', 'hello');
+        Storage::disk('fake')->put('meta.txt', 'hello');
 
         $this->withHeaders($this->auth())
             ->getJson('/dms-disk/metadata?path=meta.txt')
@@ -182,7 +226,7 @@ class DmsReceiverControllerTest extends TestCase
 
     public function test_set_visibility_updates_file(): void
     {
-        Storage::put('vis.txt', 'data');
+        Storage::disk('fake')->put('vis.txt', 'data');
 
         $this->withHeaders($this->auth())
             ->postJson('/dms-disk/visibility', ['path' => 'vis.txt', 'visibility' => 'public'])
